@@ -31,7 +31,7 @@
             overflow-x: hidden;
         }
 
-        /* CRT Scanline Overlay */
+        /* Original CRT Overlay */
         body::after {
             content: "";
             position: fixed;
@@ -124,11 +124,6 @@
             position: relative;
         }
 
-        /* 
-           PREMISE DISPLAY:
-           Default opacity 0.
-           Fast transition (0.1s).
-        */
         .premise-display {
             font-size: 1.4rem;
             color: #fff;
@@ -137,7 +132,7 @@
             font-weight: 400;
             min-height: 80px;
             max-width: 90%;
-            opacity: 0; 
+            opacity: 0; /* Sync Logic */
             transition: opacity 0.1s ease-out;
             will-change: opacity;
         }
@@ -247,15 +242,15 @@
 
 <script>
 /**
- * IMAGI-WORLD ENGINE v13.0 (Audio Clipping & Buffer Fix)
+ * IMAGI-WORLD ENGINE v14.0 (The Sandwich Buffer Fix)
  * 
- * CORE AUDIO FIX:
- * - The "Comma Buffer": We prepend ", , " to every text string.
- * - This forces the audio engine to process a silent pause at the start.
- * - Hardware "ramps up" during the comma-pause, preventing the first letter ("I") from clipping.
+ * AUDIO FIX:
+ * - "The Sandwich": All text is wrapped in: ". . . [TEXT] . . ."
+ * - Start Dots: Wake up hardware before meaningful text.
+ * - End Dots: Keep hardware awake after meaningful text.
  * 
- * SYNC ADJUSTMENT:
- * - Visuals appear 150ms AFTER 'onstart' to align with the sound following the comma buffer.
+ * SYNC FIX:
+ * - Visuals delayed 400ms after 'onstart' to account for the ". . ." buffer.
  */
 
 const RELATIONS = {
@@ -373,7 +368,6 @@ class GameEngine {
         return new Promise(resolve => {
             const display = document.getElementById('premise-display');
             
-            // Reset Visuals
             display.style.transition = 'none';
             display.style.opacity = '0';
             display.innerText = text;
@@ -382,10 +376,11 @@ class GameEngine {
 
             this.synth.cancel();
             
-            // AUDIO CLIP FIX: "Comma Space Comma Space" creates a silence buffer.
-            // The hardware wakes up during this silence.
-            // The text "I is..." follows cleanly.
-            const safeText = ", , " + text;
+            // THE SANDWICH FIX:
+            // Dots at start wake up hardware.
+            // Dots at end keep channel open so last letter isn't clipped.
+            const safeText = ". . . " + text + " . . .";
+            
             const u = new SpeechSynthesisUtterance(safeText);
             
             const voices = this.synth.getVoices();
@@ -397,10 +392,10 @@ class GameEngine {
             u.volume = 1.0;
 
             u.onstart = () => { 
-                // SYNC FIX: Wait 150ms for the comma-pause to finish before showing text
+                // VISUAL SYNC: Wait 400ms for the initial ". . . " to be spoken invisibly
                 setTimeout(() => {
                     display.style.opacity = '1';
-                }, 150);
+                }, 400);
             };
             u.onend = () => { resolve(); };
             u.onerror = () => resolve();
@@ -410,8 +405,8 @@ class GameEngine {
     }
 
     speakPlain(text) {
-         // Buffer countdown as well so "3" isn't clipped
-         const u = new SpeechSynthesisUtterance(", , " + text);
+         // Sandwich buffer for countdown too
+         const u = new SpeechSynthesisUtterance(". . . " + text + " . . .");
          u.rate = 1.15;
          u.volume = 1.0;
          this.synth.speak(u);
@@ -430,7 +425,8 @@ class GameEngine {
         for (let num of count) {
             display.innerText = num === "Three" ? "3" : (num === "Two" ? "2" : "1");
             this.speakPlain(num);
-            await new Promise(r => setTimeout(r, 1000));
+            // Increased wait time to prevent overlap due to longer buffered audio
+            await new Promise(r => setTimeout(r, 1300));
         }
 
         display.style.opacity = '0';
@@ -566,17 +562,20 @@ class GameEngine {
 const game = new GameEngine();
 
 document.getElementById('start-btn').addEventListener('click', () => {
+    // 1. UNLOCK AUDIO
     window.speechSynthesis.cancel();
-    const unlock = new SpeechSynthesisUtterance("Starting");
+    // Sandwich buffer for start unlock too
+    const unlock = new SpeechSynthesisUtterance(". . . Starting . . .");
     unlock.volume = 1.0;
     window.speechSynthesis.speak(unlock);
 
+    // 2. GATHER SETTINGS
     game.n = parseInt(document.getElementById('n-slider').value);
     game.k = parseInt(document.getElementById('k-slider').value);
     game.spt = parseFloat(document.getElementById('spt-slider').value);
     const trials = parseInt(document.getElementById('numTrialsInput').value);
     
-    // 1.5s Start Gap for Audio Prep
+    // 3. START GAP (1.5s Delay)
     setTimeout(() => {
         game.runSession(trials);
     }, 1500);
