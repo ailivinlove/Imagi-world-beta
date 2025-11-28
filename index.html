@@ -198,7 +198,8 @@
         </div>
 
         <div class="control-group">
-            <label>Thinking Time (Seconds) <span id="spt-value" style="color:var(--highlight)">4.0</span>s</label>
+            <!-- Label changed to reflect FIXED TOTAL TIME -->
+            <label>Total Trial Duration <span id="spt-value" style="color:var(--highlight)">4.0</span>s</label>
             <input type="range" id="spt-slider" min="1.5" max="20" step="0.5" value="4.0">
         </div>
         
@@ -247,13 +248,19 @@
 
 <script>
 /**
- * IMAGI-WORLD ENGINE v20.0 (Vocal Speed + Hardware Oscillator)
+ * IMAGI-WORLD ENGINE v21.0 (Fixed Pacing Logic)
  * 
- * FEATURES:
- * 1. VOCAL SPEED: Customizable Speech Rate (0.8x to 3.5x).
- * 2. HARDWARE WAKE-LOCK: Oscillator loop keeps iPhone amp active to prevent clipping.
- * 3. LOGIC: Anti-Replication, High Entropy, Strict Da Vinci Inversion.
- * 4. TIMING: Thinking time is strictly post-speech.
+ * TIMING FIX:
+ * - Slider now represents TOTAL CYCLE TIME (Speech + Thinking).
+ * - Code subtracts speech duration from the input window.
+ * - This creates a strict rhythm (e.g., exactly 3s per trial).
+ * 
+ * AUDIO FIX:
+ * - Hardware Oscillator Wake-Lock (Silent Hum).
+ * - No text hacks needed.
+ * 
+ * LOGIC:
+ * - Anti-Replication, High Entropy, Da Vinci Inversion.
  */
 
 const RELATIONS = {
@@ -262,7 +269,7 @@ const RELATIONS = {
 };
 const AXES = Object.keys(RELATIONS);
 
-// Silent MP3 to keep audio driver active (Base64)
+// Silent MP3 Base64
 const SILENT_AUDIO_URI = 'data:audio/mp3;base64,SUQzBAAAAAAAI1RTS1QAAAAIAAABTGF2b2YAAABCQAAAAAAAAAAAAAAhbGluZWFyAAAAAAABAAAAAAAAAAAA//uQZAAAAAAAAAAAAQIACAAAEAIAAAAETEFNRTMuOTguMgAAAAAAAAAA//uQZAAABAAAAAAAAAAAAQIACAAAEAIAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA//uQZAAABAAAAAAAAAAAAQIACAAAEAIAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
 
 class RNG {
@@ -364,13 +371,13 @@ class GameEngine {
         this.n = 1;
         this.k = 1;
         this.spt = 4.0;
-        this.rate = 1.1; // Default speed
+        this.rate = 1.1; 
         this.running = false;
         this.abortCtrl = null;
         this.score = 0;
         this.synth = window.speechSynthesis;
         
-        // Carrier Wave: Holds the AudioContext open
+        // Carrier Wave
         this.audioCtx = null;
         this.oscillator = null;
     }
@@ -383,7 +390,6 @@ class GameEngine {
         if (this.audioCtx.state === 'suspended') {
             this.audioCtx.resume();
         }
-        // Silent Oscillator Wake-Lock
         this.oscillator = this.audioCtx.createOscillator();
         const gainNode = this.audioCtx.createGain();
         gainNode.gain.value = 0.0001; 
@@ -419,8 +425,6 @@ class GameEngine {
             const preferred = voices.find(v => v.name.includes('Samantha')) || 
                               voices.find(v => v.lang.startsWith('en'));
             if(preferred) u.voice = preferred;
-            
-            // APPLY CUSTOM RATE
             u.rate = this.rate; 
             u.pitch = 1.0;
             u.volume = 1.0;
@@ -470,7 +474,6 @@ class GameEngine {
         document.getElementById('score').innerText = "0";
         document.getElementById('accuracy').innerText = "--";
 
-        // Hardware Wake-Lock
         this.initAudioContext();
 
         try {
@@ -483,6 +486,10 @@ class GameEngine {
             for (let i = 0; i < totalTrials; i++) {
                 if (this.abortCtrl.signal.aborted) break;
                 
+                // Fixed Rhythm Start
+                const cycleStart = Date.now();
+
+                // Logic
                 let isMatch = (i >= this.n) && (this.rng.next() > 0.70);
                 const target = isMatch ? this.history[i - this.n] : null;
                 
@@ -504,13 +511,22 @@ class GameEngine {
                 document.getElementById('diag-status').innerText = `TRIAL ${i+1}`;
                 document.getElementById('diag-meta').innerText = `${debugType}`;
 
-                // Speak
+                // Speak (Consume Time)
                 await this.speakBlocking(premise.toString());
                 
                 if (this.abortCtrl.signal.aborted) break;
 
-                // Wait (Thinking Time starts after speech ends)
-                const userAction = await this.waitForInput(this.spt * 1000, this.abortCtrl.signal);
+                // TIMING FIX: Calculate Remaining Time for Fixed Interval
+                const elapsed = Date.now() - cycleStart;
+                const totalCycleTime = this.spt * 1000;
+                let remainingInputTime = totalCycleTime - elapsed;
+                
+                // If speech took too long, give a minimum 0ms buffer (instant flip)
+                // or a small safety buffer (e.g. 500ms) if you prefer fairness.
+                // Given your rigorous request, we let speech eat the budget.
+                if (remainingInputTime < 0) remainingInputTime = 0; 
+
+                const userAction = await this.waitForInput(remainingInputTime, this.abortCtrl.signal);
                 
                 if (!this.abortCtrl.signal.aborted) {
                     let correct = false;
@@ -581,7 +597,7 @@ class GameEngine {
 
     endSession() {
         this.running = false;
-        this.closeAudioContext(); 
+        this.closeAudioContext();
         document.getElementById('status').innerText = "SESSION END";
         document.getElementById('start-btn').disabled = false;
         document.getElementById('stop-btn').disabled = true;
